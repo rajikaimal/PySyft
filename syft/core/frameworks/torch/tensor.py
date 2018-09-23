@@ -953,7 +953,7 @@ class _FixedPrecisionTensor(_SyftTensor):
             if not already_encoded:
                 torch_type = "syft." + type(child).__name__
             else:
-                torch_type = 'syft.FloatTensor'
+                torch_type = 'syft.FloatTensor' # FIXME or sy.Variable
 
         super().__init__(child=child, owner=owner, torch_type=torch_type)
 
@@ -1048,7 +1048,8 @@ class _FixedPrecisionTensor(_SyftTensor):
             self = command['self']
             if attr == '__add__':
                 torch_tensorvar = cls.__add__(self, *args, **kwargs)
-                return torch_tensorvar.fix_precision()
+                print(torch_tensorvar)
+                return torch_tensorvar.fix_precision(already_encoded=True)
             if attr == 'share':
                 return self.share(*args, **kwargs)
             else:
@@ -1371,6 +1372,7 @@ class _TorchObject(object):
             return ptr.wrap(True)
         else:
             fpt = lambda tensorvar, is_encoded: _FixedPrecisionTensor(tensorvar,
+                                                       torch_type=tensorvar.child.torch_type,
                                                        qbits=qbits,
                                                        base=base,
                                                        precision_fractional=precision_fractional,
@@ -1394,7 +1396,7 @@ class _TorchObject(object):
                     _var.grad.child.data = _var.grad.data.child
                 return _var
             else:
-                return fpt(self)
+                return fpt(self, already_encoded)
 
     def native_fix_precision(self, *args, **kwargs):
         return self.fix_precision(*args, **kwargs)
