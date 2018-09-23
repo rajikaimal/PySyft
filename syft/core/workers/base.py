@@ -326,6 +326,7 @@ class BaseWorker(ABC):
         #  hosted locally
         elif message_wrapper['type'] == 'torch_cmd':
             result = self.process_torch_command(message)
+            torch_utils.enforce_owner(result, self)
             self.register(result)
             return result, True  # Result is private
 
