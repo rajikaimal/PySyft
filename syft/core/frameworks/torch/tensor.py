@@ -64,9 +64,7 @@ class _SyftTensor(object):
         :param new_id: a string or integer id
         :return: returns self, for convenience.
         """
-
-
-        if(new_id not in self.owner._objects):
+        if new_id not in self.owner._objects:
             if not hasattr(self, 'old_ids'):
                 self.old_ids = set()
 
@@ -420,7 +418,7 @@ class _LocalTensor(_SyftTensor):
             if isinstance(response, (int, float, bool)):
                 response = torch_type([response])
             elif isinstance(response, (np.ndarray, )):
-                print("hardcoding FloatTensor")
+                logging.warning("[np.ndarray] Hardcoding FloatTensor")
                 response = sy.FloatTensor(response)
         else:
             if isinstance(response, (int, float, bool, np.ndarray)):
@@ -555,8 +553,6 @@ class _WrapTorchObjectPlusIsMinusTensor(_SyftTensor):
     A production example of this tensor is _MPCTensor
 
     """
-
-
     def __init__(self, child=None, owner=None, torch_type=None):
         super().__init__(child=child, owner=owner)
 
@@ -580,8 +576,6 @@ class _WrapTorchObjectPlusIsMinusTensor(_SyftTensor):
         :param owner:
         :return:
         """
-
-
         attr = command['command']
         args = command['args']
         kwargs = command['kwargs']
@@ -815,7 +809,7 @@ class _PointerTensor(_SyftTensor):
 
         worker_ids = list()
         for worker in workers:
-            if(hasattr(worker, 'id')):
+            if hasattr(worker, 'id'):
                 worker_ids.append(worker.id)
             else:
                 worker_ids.append(worker)
@@ -831,7 +825,7 @@ class _PointerTensor(_SyftTensor):
 
     def register_pointer(self):
         worker = self.owner
-        if(isinstance(self.location, int)):
+        if isinstance(self.location, int):
             location = self.location
         else:
             location = self.location.id
@@ -977,7 +971,6 @@ class _PointerTensor(_SyftTensor):
         return sy.Size(self.handle_call(cmd, self.owner).get().int().tolist())
 
 
-
 class _FixedPrecisionTensor(_SyftTensor):
     """
     TODO: write this
@@ -988,7 +981,7 @@ class _FixedPrecisionTensor(_SyftTensor):
                  child=None,
                  owner=None,
                  torch_type=None,
-                 qbits=31,
+                 bits=31,
                  base=10,
                  precision_fractional=6,
                  already_encoded=False):
@@ -1001,10 +994,8 @@ class _FixedPrecisionTensor(_SyftTensor):
 
         super().__init__(child=child, owner=owner, torch_type=torch_type)
 
-        #         self.torch_type = torch_type
-
-        self.qbits = qbits
-        self.field = 2**qbits
+        self.bits = bits
+        self.field = 2 ** bits
         self.base = base
         self.precision_fractional = precision_fractional
         self.torch_max_value = torch.LongTensor([round(self.field / 2)])
@@ -1021,7 +1012,7 @@ class _FixedPrecisionTensor(_SyftTensor):
             'id': self.id,
             'child': self.child.ser(private=private, as_dict=True),
             'torch_type': self.torch_type,
-            'qbits': self.qbits,
+            'bits': self.bits,
             'base': self.base,
             'precision_fractional': self.precision_fractional,
         }
@@ -1042,7 +1033,7 @@ class _FixedPrecisionTensor(_SyftTensor):
             obj = _FixedPrecisionTensor(child=child,
                                         owner=worker,
                                         torch_type=msg_obj['torch_type'],
-                                        qbits=msg_obj['qbits'],
+                                        bits=msg_obj['bits'],
                                         base=msg_obj['base'],
                                         precision_fractional=msg_obj['precision_fractional'],
                                         already_encoded=True)
@@ -1092,14 +1083,12 @@ class _FixedPrecisionTensor(_SyftTensor):
             self = command['self']
             if attr == '__add__':
                 torch_tensorvar = cls.__add__(self, *args, **kwargs)
-                print(torch_tensorvar)
                 return torch_tensorvar.fix_precision(already_encoded=True)
             if attr == 'share':
                 return self.share(*args, **kwargs)
             else:
                 result_child = getattr(self.child, attr)(*args, **kwargs)
                 return _FixedPrecisionTensor(result_child).wrap(True)
-
 
     def get(self, *args, **kwargs):
         self.child = self.child.get(*args, **kwargs)
@@ -1111,13 +1100,13 @@ class _FixedPrecisionTensor(_SyftTensor):
         return response
 
     def __repr__(self):
-        if(not isinstance(self.child, _MPCTensor)):
+        if not isinstance(self.child, _MPCTensor):
             return "[Fixed precision]\n"+self.decode().__repr__()
         else:
             return "[Fixed precision]\n" + self.child.__repr__()
 
     def __str__(self):
-        if (not isinstance(self.child, _MPCTensor)):
+        if not isinstance(self.child, _MPCTensor):
             return "[Fixed precision]\n" + self.decode().__repr__()
         else:
             return "[Fixed precision]\n" + self.child.__repr__()
@@ -1144,21 +1133,21 @@ class _MPCTensor(_SyftTensor):
         super().__init__(*args, **kwargs)
         # Fixme: remove the share on init, declaring a MPCTensor should autmatically create a _GeneralizedPointerTensor
 
-        if(shares is not None):
+        if shares is not None:
             if isinstance(shares, sy._GeneralizedPointerTensor):
                 raise TypeError('Should have a wrapper on the _GeneralizedPointerTensor')
 
             self.shares = shares  # shares is a _GeneralizedPointerTensor
             self.child = self.shares
 
-        elif(child is not None):
+        elif child is not None:
             if isinstance(child, sy._GeneralizedPointerTensor):
                 raise TypeError('Should have a wrapper on the _GeneralizedPointerTensor')
 
             self.child = child
             self.shares = self.child
         else:
-            print("cannot initialize MPCTensor with shares and child both == None")
+            raise TypeError("cannot initialize MPCTensor with shares and child both == None")
         self.torch_type = torch_type
 
         # self.allow_arbitrary_arg_types_for_methods = set()
@@ -1183,13 +1172,11 @@ class _MPCTensor(_SyftTensor):
         General method for de-serializing an MPCTensor
         """
 
-        if(acquire):
+        if acquire:
             gpt_dct = list(msg_obj['shares'].items())[0][1]['child']['___GeneralizedPointerTensor__']
             shares = _GeneralizedPointerTensor.deser(gpt_dct, worker, acquire).wrap(True)
 
-
             shares.child.child = shares
-
 
             result = _MPCTensor(shares=shares,
                                 id=msg_obj['id'],
@@ -1199,7 +1186,6 @@ class _MPCTensor(_SyftTensor):
             return result
         else:
             return _SyftTensor.deser(msg_obj, worker, acquire)
-
 
     # The table of command you want to replace
     substitution_table = {
@@ -1254,8 +1240,7 @@ class _MPCTensor(_SyftTensor):
         return response
 
     def __mul__(self, other):
-
-        if(isinstance(other, _MPCTensor)):
+        if isinstance(other, _MPCTensor):
             workers = list(self.shares.child.pointer_tensor_dict.keys())
             gp_response = spdz.spdz_mul(self.shares, other.shares, workers)
         else:
@@ -1265,7 +1250,6 @@ class _MPCTensor(_SyftTensor):
         return response
 
     def mm(self, other):
-
         workers = list(self.shares.child.pointer_tensor_dict.keys())
         gp_response = spdz.spdz_matmul(self.shares, other.shares, workers)
         response = _MPCTensor(gp_response).wrap(True)
@@ -1297,27 +1281,24 @@ class _MPCTensor(_SyftTensor):
         :param owner:
         :return:
         """
-
-
         attr = command['command']
         args = command['args']
         kwargs = command['kwargs']
         self = command['self']
 
-        if(attr == '__mul__'):
+        if attr == '__mul__':
             return cls.__mul__(self, *args, **kwargs)
-        elif (attr == '__add__'):
+        elif attr == '__add__':
             return cls.__add__(self, *args, **kwargs)
-        elif (attr == '__sub__'):
+        elif attr == '__sub__':
             return cls.__sub__(self, *args, **kwargs)
-        elif(attr == 'sum'):
+        elif attr == 'sum':
             return cls.sum(self, *args, **kwargs)
-        elif(attr == 'mm'):
+        elif attr == 'mm':
             return cls.mm(self, *args, **kwargs)
         else:
             result_child = getattr(self.child, attr)(*args, **kwargs)
             return _MPCTensor(result_child).wrap(True)
-
 
     def send(self, workers):
         self.n_workers = len(workers)
@@ -1326,7 +1307,6 @@ class _MPCTensor(_SyftTensor):
         self.workers = workers
         for share, worker in zip(self.shares, self.workers):
             share.send(worker)
-
 
     def get(self, deregister_ptr=False):
         # TODO: have deregister_ptr do something
@@ -1358,18 +1338,17 @@ class _TorchObject(object):
         return self.get_shape()
 
     def share(self, *workers):
-
-        if(isinstance(self.child, _PointerTensor)):
-
+        """
+        Create additive shares of a tensorvar and send them to workers
+        """
+        if isinstance(self.child, _PointerTensor):
             return self.child.share(*workers).wrap(True)
-        elif(isinstance(self.child, _FixedPrecisionTensor)):
 
+        elif isinstance(self.child, _FixedPrecisionTensor):
             self.child.child = self.child.child.share(*workers)
             return self
+
         else:
-            # print("not sharing fpt or pointer")
-            # print(type(self.child))
-            # print(abc)
             n_workers = len(workers)
             x_enc = self._encode()
             shares = self._share(n_workers)
@@ -1394,7 +1373,7 @@ class _TorchObject(object):
         return spdz.encode(self)
 
     def fix_precision(self,
-                      qbits=31,
+                      bits=31,
                       base=10,
                       precision_fractional=6,
                       already_encoded=False):
@@ -1416,11 +1395,11 @@ class _TorchObject(object):
             return ptr.wrap(True)
         else:
             fpt = lambda tensorvar, is_encoded: _FixedPrecisionTensor(tensorvar,
-                                                       torch_type=tensorvar.child.torch_type,
-                                                       qbits=qbits,
-                                                       base=base,
-                                                       precision_fractional=precision_fractional,
-                                                       already_encoded=is_encoded).wrap(True)
+                                                                      torch_type=tensorvar.child.torch_type,
+                                                                      bits=bits,
+                                                                      base=base,
+                                                                      precision_fractional=precision_fractional,
+                                                                      already_encoded=is_encoded).wrap(True)
 
             if torch_utils.is_variable(self):
                 _var = fpt(self, already_encoded)
@@ -1460,7 +1439,7 @@ class _TorchObject(object):
         if torch_utils.is_tensor(self) and hasattr(self, 'child') and not isinstance(self.child, (
                 sy._LocalTensor, sy._PointerTensor)):
 
-            if(isinstance(self.child, sy._FixedPrecisionTensor)):
+            if isinstance(self.child, sy._FixedPrecisionTensor):
                 return self.child.__repr__()
 
             x_ = type(self)()
@@ -1488,28 +1467,6 @@ class _TorchObject(object):
         self->alice->obj [worker] => self->alice->worker->obj
         """
         raise NotImplementedError('Move is not supported anymore.')
-        if isinstance(worker, (int, str)):
-            worker = self.owner.get_worker(worker)
-
-        if new_id is None:
-            new_id = random.randint(0, 10e10)
-
-        if isinstance(self.child, sy._PointerTensor):
-            pointer = self.child
-        else:
-            pointer = None
-
-        if pointer is None:
-            return self.send(worker, new_id)
-
-        command, _ = pointer.compile_command('move',
-                                             (worker.id, new_id),
-                                             {},
-                                             True)
-
-        response = pointer.owner.send_torch_command(recipient=pointer.location,
-                                                    message=command)
-        return self
 
 
 class _TorchTensor(_TorchObject):
@@ -1518,7 +1475,7 @@ class _TorchTensor(_TorchObject):
         if isinstance(self.child, _PointerTensor):
             return type(self).__name__ + self.child.__str__() + ""
         elif isinstance(self.child, _LocalTensor) and torch_utils.is_tensor_empty(self):
-            if (hasattr(self.child, 'child')):
+            if hasattr(self.child, 'child'):
                 return self.child.child.native___str__()
             else:
                 return "Empty Wrapper:\n" + self.native___str__()
@@ -1569,7 +1526,6 @@ class _TorchTensor(_TorchObject):
         # This would imply overload differently the __init__ to provide an owner for the child attr.
         worker.hook.local_worker.de_register(tensorvar)
 
-
         # Ensure that the loop is made, if needed
         if isinstance(torch_utils.find_tail_of_chain(tensorvar), sy._LocalTensor):
             torch_utils.fix_chain_ends(tensorvar)
@@ -1581,6 +1537,8 @@ class _TorchTensor(_TorchObject):
         Send to multiple workers and get back a _GeneralizedPointerTensor
         :return:
         """
+        # TODO: Doublon with the new functionality send(*worker)
+        # Even if .send is on Var and .broadcast en _GenPtrT
         pointers_dict = {}
         for worker in workers:
             pointers_dict[worker] = self.clone().send(worker).child
@@ -1606,7 +1564,6 @@ class _TorchTensor(_TorchObject):
                 gpt_dict[worker] = (self*1).send(worker).child
             sy._GeneralizedPointerTensor(gpt_dict).on(self)
             return self
-
 
         if isinstance(worker, (int, str)):
             worker = self.owner.get_worker(worker)
