@@ -56,7 +56,20 @@ class _SyftTensor(object):
             return self.child.get_shape()
 
     def share(self, *workers):
-        return self.wrap(True).share(*workers)
+        if torch_utils.is_variable(self.child):
+            response = self.child.share(*workers)
+            self.child = response
+            self.data.child = response.data
+            self.grad.child = response.grad
+            self.grad.data.child = response.grad.data
+            r = self.wrap(True)
+            r.data.child = self.data
+            r.init_grad_()
+            r.grad.child = self.grad
+            r.grad.data.child = self.grad.data
+            return r
+        else:
+            return self.wrap(True).share(*workers)
 
     def set_id(self, new_id):
         """
@@ -822,7 +835,9 @@ class _PointerTensor(_SyftTensor):
         cmd['has_self'] = True
         cmd['self'] = self
 
-        return self.handle_call(cmd, self.owner)
+        response =  self.handle_call(cmd, self.owner)
+
+        return response
 
     def register_pointer(self):
         worker = self.owner
@@ -868,6 +883,9 @@ class _PointerTensor(_SyftTensor):
         # pointer, instead jof returning the new wrapper created in response
         if has_self and utils.is_in_place_method(attr):
             return syft_command['self']
+
+        if torch_utils.is_variable(response):
+            torch_utils.link_var_chain_to_data_and_grad_chains(response, response.data, response.grad)
 
         # Perform the un-wrap: remove the head on all chains (also .data and .grad if any)
         response, _ = torch_utils.get_child_command(response)
@@ -1054,6 +1072,7 @@ class _FixedPrecisionTensor(_SyftTensor):
         return self
 
     def decode(self):
+        save = self.child.child*1
         self.child.child = None # <-- This is doing magic things
         value = self.child % self.field
         if len(value.size()) == 0:
@@ -1062,6 +1081,7 @@ class _FixedPrecisionTensor(_SyftTensor):
         neg_nums = (value - spdz.torch_field) * gate
         pos_nums = value * (1 - gate)
         result = (neg_nums + pos_nums).float() / (self.base ** self.precision_fractional)
+        self.child.child = save.child
         return result
 
     @classmethod
@@ -1087,7 +1107,7 @@ class _FixedPrecisionTensor(_SyftTensor):
                 return torch_tensorvar.fix_precision(already_encoded=True)
             if attr == 'share':
                 # /!\ This part is not being executed
-                response =  self.share(*args, **kwargs)
+                response = self.share(*args, **kwargs)
                 return response
             else:
                 result_child = getattr(self.child, attr)(*args, **kwargs)
@@ -1390,7 +1410,7 @@ class _TorchObject(object):
             self.child.child = var_shared
             if torch_utils.is_variable(self):
                 self.data.child.child = var_shared.data
-                if hasattr(self, 'grad'):
+                if hasattr(self, 'grad') and self.grad is not None:
                     self.grad.child.child = var_shared.grad
                     self.grad.data.child.child = var_shared.grad.data
             return self
